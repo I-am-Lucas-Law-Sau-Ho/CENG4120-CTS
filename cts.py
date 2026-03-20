@@ -246,13 +246,18 @@ class CTSSolver:
                 pin_ids = [self.pins[pi]['id'] for pi in self.tap_assignments.get(ti, [])]
                 edges = self.routing_edges.get(ti, set())
 
-                f.write(f"TAP {tap_id}\n")
-                f.write(f"PINS {len(pin_ids)}\n")
+                f.write(f"TAP {tap_id}
+")
+                f.write(f"PINS {len(pin_ids)}
+")
                 for pid in pin_ids:
-                    f.write(f"PIN {pid}\n")
-                f.write(f"ROUTING {len(edges)}\n")
+                    f.write(f"PIN {pid}
+")
+                f.write(f"ROUTING {len(edges)}
+")
                 for (x1, y1, x2, y2) in edges:
-                    f.write(f"EDGE {x1} {y1} {x2} {y2}\n")
+                    f.write(f"EDGE {x1} {y1} {x2} {y2}
+")
 
 
 # ---------------------------------------------------------------------------
@@ -301,7 +306,7 @@ def parse_input(input_file):
                     bid = int(nxt())
                     x1, y1, x2, y2 = int(nxt()), int(nxt()), int(nxt()), int(nxt())
                     solver.add_blockage(bid, x1, y1, x2, y2)
-    except StopIteration:
+    except (StopIteration, ValueError):
         pass
 
     return solver

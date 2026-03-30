@@ -4,7 +4,6 @@ CENG4120 Clock Tree Synthesis (CTS) Project
 Author: Law Sau Ho
 Description: Assigns pins to taps and routes them with blockage avoidance.
 """
-
 import argparse
 import sys
 from collections import defaultdict
@@ -12,7 +11,6 @@ from heapq import heappush, heappop
 import time
 
 NL = chr(10)
-
 
 class CTSSolver:
     """Clock Tree Synthesis solver."""
@@ -75,9 +73,11 @@ class CTSSolver:
         gs = self.grid_size
         heap = []
         heappush(heap, (abs(ex - sx) + abs(ey - sy), 0, sx, sy))
+        # FIX: use dist dict instead of prev-only to allow re-visiting with shorter g
+        dist = {(sx, sy): 0}
         prev = {(sx, sy): None}
         while heap:
-            _, g, cx, cy = heappop(heap)
+            f, g, cx, cy = heappop(heap)
             if cx == ex and cy == ey:
                 path = []
                 node = (cx, cy)
@@ -86,18 +86,21 @@ class CTSSolver:
                     node = prev[node]
                 path.reverse()
                 return path
+            # Skip if we already found a better path to this node
+            if g > dist.get((cx, cy), float('inf')):
+                continue
             ng = g + 1
             for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
                 nx, ny = cx + dx, cy + dy
                 if not (0 <= nx <= gs and 0 <= ny <= gs):
                     continue
-                if (nx, ny) in prev:
-                    continue
                 if not self._edge_ok_for_tap(cx, cy, nx, ny):
                     continue
-                prev[(nx, ny)] = (cx, cy)
-                h = abs(ex - nx) + abs(ey - ny)
-                heappush(heap, (ng + h, ng, nx, ny))
+                if ng < dist.get((nx, ny), float('inf')):
+                    dist[(nx, ny)] = ng
+                    prev[(nx, ny)] = (cx, cy)
+                    h = abs(ex - nx) + abs(ey - ny)
+                    heappush(heap, (ng + h, ng, nx, ny))
         return None
 
     def _assign_pins(self):
@@ -130,7 +133,6 @@ class CTSSolver:
         tx, ty = t['x'], t['y']
         connected = {(tx, ty)}
         remaining = [(self.pins[pi]['x'], self.pins[pi]['y']) for pi in pis]
-
         while remaining:
             if time.time() > deadline:
                 break
@@ -142,10 +144,10 @@ class CTSSolver:
                     p = self._find_path(src[0], src[1], dx, dy)
                     if p is not None and len(p) < best_len:
                         best_len, best_dst, best_path = len(p), dst, p
-                        if best_len == 2:
-                            break
                 if best_len == 2:
                     break
+            if best_len == 2:
+                break
             if best_path is None:
                 break
             for i in range(len(best_path) - 1):
@@ -192,6 +194,7 @@ def parse_input(input_file):
         return next(it)
 
     rt = ml = gs = cp = None
+    solver = None
     try:
         while True:
             tok = nxt()
@@ -209,28 +212,35 @@ def parse_input(input_file):
                 solver = CTSSolver(rt, ml, gs, cp)
                 n = int(nxt())
                 for _ in range(n):
-                    nxt()
+                    nxt()  # skip 'PIN' keyword
                     pid, px, py = int(nxt()), int(nxt()), int(nxt())
                     solver.add_pin(pid, px, py)
-                tok = nxt()
-                if tok == 'TAPS':
-                    n = int(nxt())
-                    for _ in range(n):
-                        nxt()
-                        tid, tx, ty = int(nxt()), int(nxt()), int(nxt())
-                        solver.add_tap(tid, tx, ty)
-                tok = nxt()
-                if tok == 'BLKS':
-                    n = int(nxt())
-                    for _ in range(n):
-                        nxt()
-                        bid = int(nxt())
-                        x1, y1 = int(nxt()), int(nxt())
-                        x2, y2 = int(nxt()), int(nxt())
-                        solver.add_blockage(bid, x1, y1, x2, y2)
-                return solver
-    except (StopIteration, ValueError, AttributeError):
+            elif tok == 'TAPS':
+                if solver is None:
+                    break
+                n = int(nxt())
+                for _ in range(n):
+                    nxt()  # skip 'TAP' keyword
+                    tid, tx, ty = int(nxt()), int(nxt()), int(nxt())
+                    solver.add_tap(tid, tx, ty)
+            elif tok == 'BLKS':
+                if solver is None:
+                    break
+                n = int(nxt())
+                for _ in range(n):
+                    nxt()  # skip 'BLK' keyword
+                    bid = int(nxt())
+                    x1, y1 = int(nxt()), int(nxt())
+                    x2, y2 = int(nxt()), int(nxt())
+                    solver.add_blockage(bid, x1, y1, x2, y2)
+    except StopIteration:
         pass
+    except (ValueError, AttributeError) as e:
+        print(f'WARNING: Parse error: {e}', file=sys.stderr)
+    # FIX: always return solver if it was successfully created,
+    # even if StopIteration fired before explicit return
+    if solver is not None:
+        return solver
     if ml is not None and gs is not None and cp is not None:
         return CTSSolver(rt, ml, gs, cp)
     return None

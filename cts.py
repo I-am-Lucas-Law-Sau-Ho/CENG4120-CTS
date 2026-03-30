@@ -73,7 +73,6 @@ class CTSSolver:
         gs = self.grid_size
         heap = []
         heappush(heap, (abs(ex - sx) + abs(ey - sy), 0, sx, sy))
-        # FIX: use dist dict instead of prev-only to allow re-visiting with shorter g
         dist = {(sx, sy): 0}
         prev = {(sx, sy): None}
         while heap:
@@ -132,22 +131,26 @@ class CTSSolver:
         t = self.taps[tap_idx]
         tx, ty = t['x'], t['y']
         connected = {(tx, ty)}
-        remaining = [(self.pins[pi]['x'], self.pins[pi]['y']) for pi in pis]
+        # FIX: track remaining pins by index (not coordinate) to avoid
+        # issues when two pins share the same (x, y) coordinates.
+        remaining = list(range(len(pis)))  # indices into pis
         while remaining:
             if time.time() > deadline:
                 break
-            best_path, best_dst, best_len = None, None, float('inf')
-            for dst in remaining:
-                dx, dy = dst
+            best_path, best_idx, best_len = None, None, float('inf')
+            for ri, pi_idx in enumerate(remaining):
+                pin = self.pins[pis[pi_idx]]
+                dx, dy = pin['x'], pin['y']
                 cands = sorted(connected, key=lambda p: abs(p[0] - dx) + abs(p[1] - dy))
                 for src in cands[:min(10, len(cands))]:
                     p = self._find_path(src[0], src[1], dx, dy)
                     if p is not None and len(p) < best_len:
-                        best_len, best_dst, best_path = len(p), dst, p
-                if best_len == 2:
-                    break
-            if best_len == 2:
-                break
+                        best_len = len(p)
+                        best_idx = ri
+                        best_path = p
+                        # FIX: removed the incorrect early-break that was
+                        # exiting the outer loop when any adjacent path was
+                        # found, potentially skipping better routes.
             if best_path is None:
                 break
             for i in range(len(best_path) - 1):
@@ -157,7 +160,11 @@ class CTSSolver:
                 self.routing_edges[tap_idx].add(k)
                 self.global_edge_usage[k] += 1
                 connected.add((bx, by))
-            remaining.remove(best_dst)
+            # FIX: also add all intermediate path nodes to connected so they
+            # can be reused as Steiner points for subsequent pins.
+            for node in best_path:
+                connected.add(node)
+            remaining.pop(best_idx)
 
     def solve(self):
         t0 = time.time()
@@ -207,8 +214,11 @@ def parse_input(input_file):
             elif tok == 'CAPACITY':
                 cp = int(nxt())
             elif tok == 'PINS':
+                # FIX: use 'continue' instead of 'break' so that if required
+                # headers haven't been seen yet we skip and keep parsing,
+                # rather than aborting the entire parse loop.
                 if ml is None or gs is None or cp is None:
-                    break
+                    continue
                 solver = CTSSolver(rt, ml, gs, cp)
                 n = int(nxt())
                 for _ in range(n):
@@ -216,16 +226,18 @@ def parse_input(input_file):
                     pid, px, py = int(nxt()), int(nxt()), int(nxt())
                     solver.add_pin(pid, px, py)
             elif tok == 'TAPS':
+                # FIX: use 'continue' instead of 'break'.
                 if solver is None:
-                    break
+                    continue
                 n = int(nxt())
                 for _ in range(n):
                     nxt()  # skip 'TAP' keyword
                     tid, tx, ty = int(nxt()), int(nxt()), int(nxt())
                     solver.add_tap(tid, tx, ty)
             elif tok == 'BLKS':
+                # FIX: use 'continue' instead of 'break'.
                 if solver is None:
-                    break
+                    continue
                 n = int(nxt())
                 for _ in range(n):
                     nxt()  # skip 'BLK' keyword
@@ -237,8 +249,6 @@ def parse_input(input_file):
         pass
     except (ValueError, AttributeError) as e:
         print(f'WARNING: Parse error: {e}', file=sys.stderr)
-    # FIX: always return solver if it was successfully created,
-    # even if StopIteration fired before explicit return
     if solver is not None:
         return solver
     if ml is not None and gs is not None and cp is not None:

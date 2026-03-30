@@ -14,7 +14,6 @@ NL = chr(10)
 
 class CTSSolver:
     """Clock Tree Synthesis solver."""
-
     def __init__(self, max_runtime, max_load, grid_size, capacity):
         self.max_runtime = max_runtime if max_runtime is not None else 300
         self.max_load = max_load
@@ -105,11 +104,9 @@ class CTSSolver:
     def _assign_pins(self):
         """Greedy nearest-tap assignment."""
         tap_loads = [0] * len(self.taps)
-
         def nearest_dist(pi):
             px, py = self.pins[pi]['x'], self.pins[pi]['y']
             return min(abs(px - t['x']) + abs(py - t['y']) for t in self.taps)
-
         for pi in sorted(range(len(self.pins)), key=nearest_dist):
             px, py = self.pins[pi]['x'], self.pins[pi]['y']
             best_ti, best_d = None, float('inf')
@@ -131,9 +128,10 @@ class CTSSolver:
         t = self.taps[tap_idx]
         tx, ty = t['x'], t['y']
         connected = {(tx, ty)}
-        # FIX: track remaining pins by index (not coordinate) to avoid
-        # issues when two pins share the same (x, y) coordinates.
-        remaining = list(range(len(pis)))  # indices into pis
+        remaining = list(range(len(pis)))
+        # Track edges used in this tap's tree to avoid double-counting
+        tap_edges = set()
+
         while remaining:
             if time.time() > deadline:
                 break
@@ -148,9 +146,7 @@ class CTSSolver:
                         best_len = len(p)
                         best_idx = ri
                         best_path = p
-                        # FIX: removed the incorrect early-break that was
-                        # exiting the outer loop when any adjacent path was
-                        # found, potentially skipping better routes.
+
             if best_path is None:
                 break
             for i in range(len(best_path) - 1):
@@ -158,10 +154,11 @@ class CTSSolver:
                 bx, by = best_path[i + 1]
                 k = self._ekey(ax, ay, bx, by)
                 self.routing_edges[tap_idx].add(k)
-                self.global_edge_usage[k] += 1
-                connected.add((bx, by))
-            # FIX: also add all intermediate path nodes to connected so they
-            # can be reused as Steiner points for subsequent pins.
+                # Only increment global usage once per edge per tap
+                if k not in tap_edges:
+                    tap_edges.add(k)
+                    self.global_edge_usage[k] += 1
+            # Add all path nodes to connected so they can be reused
             for node in best_path:
                 connected.add(node)
             remaining.pop(best_idx)
@@ -191,15 +188,12 @@ class CTSSolver:
         with open(output_file, 'w') as f:
             f.write(NL.join(lines) + NL)
 
-
 def parse_input(input_file):
     with open(input_file, 'r') as f:
         data = f.read().split()
     it = iter(data)
-
     def nxt():
         return next(it)
-
     rt = ml = gs = cp = None
     solver = None
     try:
@@ -214,9 +208,6 @@ def parse_input(input_file):
             elif tok == 'CAPACITY':
                 cp = int(nxt())
             elif tok == 'PINS':
-                # FIX: use 'continue' instead of 'break' so that if required
-                # headers haven't been seen yet we skip and keep parsing,
-                # rather than aborting the entire parse loop.
                 if ml is None or gs is None or cp is None:
                     continue
                 solver = CTSSolver(rt, ml, gs, cp)
@@ -226,7 +217,6 @@ def parse_input(input_file):
                     pid, px, py = int(nxt()), int(nxt()), int(nxt())
                     solver.add_pin(pid, px, py)
             elif tok == 'TAPS':
-                # FIX: use 'continue' instead of 'break'.
                 if solver is None:
                     continue
                 n = int(nxt())
@@ -235,7 +225,6 @@ def parse_input(input_file):
                     tid, tx, ty = int(nxt()), int(nxt()), int(nxt())
                     solver.add_tap(tid, tx, ty)
             elif tok == 'BLKS':
-                # FIX: use 'continue' instead of 'break'.
                 if solver is None:
                     continue
                 n = int(nxt())
@@ -249,12 +238,12 @@ def parse_input(input_file):
         pass
     except (ValueError, AttributeError) as e:
         print(f'WARNING: Parse error: {e}', file=sys.stderr)
+
     if solver is not None:
         return solver
     if ml is not None and gs is not None and cp is not None:
         return CTSSolver(rt, ml, gs, cp)
     return None
-
 
 def main():
     parser = argparse.ArgumentParser(description='CENG4120 CTS Solver')
@@ -267,7 +256,6 @@ def main():
         sys.exit(1)
     solver.solve()
     solver.write_output(args.output)
-
 
 if __name__ == '__main__':
     main()

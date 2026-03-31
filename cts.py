@@ -99,7 +99,8 @@ class CTSSolver:
             ng = g + 1
             for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
                 nx, ny = cx + dx, cy + dy
-                if not (0 <= nx < gs and 0 <= ny < gs):
+                # Bug fix: grid nodes go from 0 to gs inclusive (gs*gs grid has (gs+1)*(gs+1) nodes)
+                if not (0 <= nx <= gs and 0 <= ny <= gs):
                     continue
                 if not self._edge_ok_for_tap(cx, cy, nx, ny, tap_idx):
                     continue
@@ -112,6 +113,8 @@ class CTSSolver:
 
     def _assign_pins(self):
         """Greedy nearest-tap assignment."""
+        if not self.taps:
+            return
         tap_loads = [0] * len(self.taps)
 
         def nearest_dist(pi):
@@ -163,8 +166,11 @@ class CTSSolver:
                         best_idx = ri
                         best_path = p
             if best_path is None:
-                # No path found for any remaining pin; skip them
-                break
+                # Bug fix: no path found for any remaining pin.
+                # Skip each unreachable pin one by one instead of aborting all.
+                # Mark the first remaining pin as unroutable and remove it.
+                remaining.pop(0)
+                continue
             for i in range(len(best_path) - 1):
                 ax, ay = best_path[i]
                 bx, by = best_path[i + 1]
@@ -209,20 +215,18 @@ def parse_input(input_file):
     with open(input_file, 'r') as f:
         data = f.read().split()
     it = iter(data)
-
     def nxt():
         return next(it)
-
     rt = ml = gs = cp = None
     solver = None
     try:
         while True:
             tok = nxt()
-            if tok == 'MAXRUNTIME':
+            if tok in ('MAXRUNTIME',):
                 rt = int(nxt())
-            elif tok == 'MAXLOAD':
+            elif tok in ('MAXLOAD', 'MAX_LOAD'):
                 ml = int(nxt())
-            elif tok == 'GRIDSIZE':
+            elif tok in ('GRIDSIZE', 'GRID_SIZE'):
                 gs = int(nxt())
             elif tok == 'CAPACITY':
                 cp = int(nxt())

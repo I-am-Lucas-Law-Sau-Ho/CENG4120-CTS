@@ -129,11 +129,13 @@ class CTSSolver:
                 d = abs(px - t['x']) + abs(py - t['y'])
                 if d < best_d:
                     best_d, best_ti = d, ti
-            # Bug fix: if all taps are at max load, assign to nearest tap anyway
+            # If all taps are at max load, assign to nearest tap anyway
             # (violates load constraint but ensures connectivity, giving partial credit)
             if best_ti is None:
-                best_ti = min(range(len(self.taps)),
-                              key=lambda ti: abs(px - self.taps[ti]['x']) + abs(py - self.taps[ti]['y']))
+                best_ti = min(
+                    range(len(self.taps)),
+                    key=lambda ti: abs(px - self.taps[ti]['x']) + abs(py - self.taps[ti]['y'])
+                )
             self.tap_assignments[best_ti].append(pi)
             tap_loads[best_ti] += 1
 
@@ -149,21 +151,27 @@ class CTSSolver:
         while remaining:
             if time.time() > deadline:
                 break
-            best_path, best_idx, best_len = None, None, float('inf')
+            best_path, best_ri, best_len = None, None, float('inf')
+            unroutable = []
             for ri, pi_idx in enumerate(remaining):
                 pin = self.pins[pis[pi_idx]]
                 dx, dy = pin['x'], pin['y']
+                # Try all connected nodes sorted by Manhattan distance (no cap)
                 cands = sorted(connected, key=lambda p: abs(p[0] - dx) + abs(p[1] - dy))
-                for src in cands[:min(10, len(cands))]:
+                found = False
+                for src in cands:
                     p = self._find_path(src[0], src[1], dx, dy, tap_idx)
-                    if p is not None and len(p) < best_len:
-                        best_len = len(p)
-                        best_idx = ri
-                        best_path = p
+                    if p is not None:
+                        if len(p) < best_len:
+                            best_len = len(p)
+                            best_ri = ri
+                            best_path = p
+                        found = True
+                        break  # Take the first (nearest) successful path for this pin
+                if not found:
+                    unroutable.append(ri)
             if best_path is None:
-                # Bug fix: use 'break' only when truly no pin is routable.
-                # This is correct: if NO remaining pin can be routed from any
-                # connected node, stop (capacity/blockage deadlock).
+                # No remaining pin is routable; stop
                 break
             # Add best path edges to routing
             for i in range(len(best_path) - 1):
@@ -176,7 +184,7 @@ class CTSSolver:
                     self.global_edge_usage[k] += 1
             for node in best_path:
                 connected.add(node)
-            remaining.pop(best_idx)
+            remaining.pop(best_ri)
 
     def solve(self):
         t0 = time.time()

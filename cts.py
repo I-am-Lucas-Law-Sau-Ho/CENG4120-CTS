@@ -25,6 +25,8 @@ class CTSSolver:
         self.tap_assignments = defaultdict(list)
         self.routing_edges = defaultdict(set)
         self.global_edge_usage = defaultdict(int)
+        # Track which edges are already used by each tap (to avoid double-counting)
+        self.tap_edge_sets = defaultdict(set)
 
     def add_pin(self, pin_id, x, y):
         self.pins.append({'id': pin_id, 'x': x, 'y': y})
@@ -43,10 +45,12 @@ class CTSSolver:
         """True if edge passes THROUGH (not on boundary of) a blockage."""
         for b in self.blockages:
             if x1 == x2:
+                # Vertical edge at x=x1, going from min(y1,y2) to max(y1,y2)
                 if b['x1'] < x1 < b['x2']:
                     if min(y1, y2) < b['y2'] and max(y1, y2) > b['y1']:
                         return True
             else:
+                # Horizontal edge at y=y1, going from min(x1,x2) to max(x1,x2)
                 if b['y1'] < y1 < b['y2']:
                     if min(x1, x2) < b['x2'] and max(x1, x2) > b['x1']:
                         return True
@@ -58,14 +62,19 @@ class CTSSolver:
             return (x1, y1, x2, y2)
         return (x2, y2, x1, y1)
 
-    def _edge_ok_for_tap(self, x1, y1, x2, y2):
-        """Check if edge can be used (blockage + global capacity)."""
+    def _edge_ok_for_tap(self, x1, y1, x2, y2, tap_idx):
+        """Check if edge can be used (blockage + global capacity).
+        Edges already used by this tap don't consume additional capacity.
+        """
         if self._edge_blocked(x1, y1, x2, y2):
             return False
         k = self._ekey(x1, y1, x2, y2)
+        # If this tap already uses this edge, it won't add to global usage
+        if k in self.tap_edge_sets[tap_idx]:
+            return True
         return self.global_edge_usage[k] < self.capacity
 
-    def _find_path(self, sx, sy, ex, ey):
+    def _find_path(self, sx, sy, ex, ey, tap_idx):
         """A* path avoiding blockages and respecting global capacity."""
         if sx == ex and sy == ey:
             return [(sx, sy)]
@@ -92,7 +101,7 @@ class CTSSolver:
                 nx, ny = cx + dx, cy + dy
                 if not (0 <= nx <= gs and 0 <= ny <= gs):
                     continue
-                if not self._edge_ok_for_tap(cx, cy, nx, ny):
+                if not self._edge_ok_for_tap(cx, cy, nx, ny, tap_idx):
                     continue
                 if ng < dist.get((nx, ny), float('inf')):
                     dist[(nx, ny)] = ng
@@ -104,9 +113,11 @@ class CTSSolver:
     def _assign_pins(self):
         """Greedy nearest-tap assignment."""
         tap_loads = [0] * len(self.taps)
+
         def nearest_dist(pi):
             px, py = self.pins[pi]['x'], self.pins[pi]['y']
             return min(abs(px - t['x']) + abs(py - t['y']) for t in self.taps)
+
         for pi in sorted(range(len(self.pins)), key=nearest_dist):
             px, py = self.pins[pi]['x'], self.pins[pi]['y']
             best_ti, best_d = None, float('inf')
@@ -119,6 +130,14 @@ class CTSSolver:
             if best_ti is not None:
                 self.tap_assignments[best_ti].append(pi)
                 tap_loads[best_ti] += 1
+            else:
+                # All taps are full: assign to least-loaded tap to avoid open pins
+                min_load = min(tap_loads)
+                for ti in range(len(self.taps)):
+                    if tap_loads[ti] == min_load:
+                        self.tap_assignments[ti].append(pi)
+                        tap_loads[ti] += 1
+                        break
 
     def _route_tap(self, tap_idx, deadline):
         """Build Steiner tree for one tap using Prim's algorithm."""
@@ -129,8 +148,6 @@ class CTSSolver:
         tx, ty = t['x'], t['y']
         connected = {(tx, ty)}
         remaining = list(range(len(pis)))
-        # Track edges used in this tap's tree to avoid double-counting
-        tap_edges = set()
 
         while remaining:
             if time.time() > deadline:
@@ -141,23 +158,26 @@ class CTSSolver:
                 dx, dy = pin['x'], pin['y']
                 cands = sorted(connected, key=lambda p: abs(p[0] - dx) + abs(p[1] - dy))
                 for src in cands[:min(10, len(cands))]:
-                    p = self._find_path(src[0], src[1], dx, dy)
+                    p = self._find_path(src[0], src[1], dx, dy, tap_idx)
                     if p is not None and len(p) < best_len:
                         best_len = len(p)
                         best_idx = ri
                         best_path = p
 
             if best_path is None:
+                # No path found for any remaining pin; skip them
                 break
+
             for i in range(len(best_path) - 1):
                 ax, ay = best_path[i]
                 bx, by = best_path[i + 1]
                 k = self._ekey(ax, ay, bx, by)
                 self.routing_edges[tap_idx].add(k)
                 # Only increment global usage once per edge per tap
-                if k not in tap_edges:
-                    tap_edges.add(k)
+                if k not in self.tap_edge_sets[tap_idx]:
+                    self.tap_edge_sets[tap_idx].add(k)
                     self.global_edge_usage[k] += 1
+
             # Add all path nodes to connected so they can be reused
             for node in best_path:
                 connected.add(node)
@@ -188,12 +208,15 @@ class CTSSolver:
         with open(output_file, 'w') as f:
             f.write(NL.join(lines) + NL)
 
+
 def parse_input(input_file):
     with open(input_file, 'r') as f:
         data = f.read().split()
     it = iter(data)
+
     def nxt():
         return next(it)
+
     rt = ml = gs = cp = None
     solver = None
     try:
@@ -209,6 +232,7 @@ def parse_input(input_file):
                 cp = int(nxt())
             elif tok == 'PINS':
                 if ml is None or gs is None or cp is None:
+                    print('WARNING: PINS encountered before required parameters.', file=sys.stderr)
                     continue
                 solver = CTSSolver(rt, ml, gs, cp)
                 n = int(nxt())
@@ -218,6 +242,7 @@ def parse_input(input_file):
                     solver.add_pin(pid, px, py)
             elif tok == 'TAPS':
                 if solver is None:
+                    print('WARNING: TAPS encountered before PINS.', file=sys.stderr)
                     continue
                 n = int(nxt())
                 for _ in range(n):
@@ -226,6 +251,7 @@ def parse_input(input_file):
                     solver.add_tap(tid, tx, ty)
             elif tok == 'BLKS':
                 if solver is None:
+                    print('WARNING: BLKS encountered before PINS.', file=sys.stderr)
                     continue
                 n = int(nxt())
                 for _ in range(n):
@@ -245,17 +271,21 @@ def parse_input(input_file):
         return CTSSolver(rt, ml, gs, cp)
     return None
 
+
 def main():
     parser = argparse.ArgumentParser(description='CENG4120 CTS Solver')
     parser.add_argument('--input', required=True)
     parser.add_argument('--output', required=True)
     args = parser.parse_args()
+
     solver = parse_input(args.input)
     if solver is None:
         print('ERROR: Failed to parse input.', file=sys.stderr)
         sys.exit(1)
+
     solver.solve()
     solver.write_output(args.output)
+
 
 if __name__ == '__main__':
     main()

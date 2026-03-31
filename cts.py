@@ -99,7 +99,7 @@ class CTSSolver:
             ng = g + 1
             for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
                 nx, ny = cx + dx, cy + dy
-                if not (0 <= nx <= gs and 0 <= ny <= gs):
+                if not (0 <= nx < gs and 0 <= ny < gs):
                     continue
                 if not self._edge_ok_for_tap(cx, cy, nx, ny, tap_idx):
                     continue
@@ -148,7 +148,6 @@ class CTSSolver:
         tx, ty = t['x'], t['y']
         connected = {(tx, ty)}
         remaining = list(range(len(pis)))
-
         while remaining:
             if time.time() > deadline:
                 break
@@ -163,11 +162,9 @@ class CTSSolver:
                         best_len = len(p)
                         best_idx = ri
                         best_path = p
-
             if best_path is None:
                 # No path found for any remaining pin; skip them
                 break
-
             for i in range(len(best_path) - 1):
                 ax, ay = best_path[i]
                 bx, by = best_path[i + 1]
@@ -177,7 +174,6 @@ class CTSSolver:
                 if k not in self.tap_edge_sets[tap_idx]:
                     self.tap_edge_sets[tap_idx].add(k)
                     self.global_edge_usage[k] += 1
-
             # Add all path nodes to connected so they can be reused
             for node in best_path:
                 connected.add(node)
@@ -264,7 +260,6 @@ def parse_input(input_file):
         pass
     except (ValueError, AttributeError) as e:
         print(f'WARNING: Parse error: {e}', file=sys.stderr)
-
     if solver is not None:
         return solver
     if ml is not None and gs is not None and cp is not None:
@@ -277,12 +272,10 @@ def main():
     parser.add_argument('--input', required=True)
     parser.add_argument('--output', required=True)
     args = parser.parse_args()
-
     solver = parse_input(args.input)
     if solver is None:
         print('ERROR: Failed to parse input.', file=sys.stderr)
         sys.exit(1)
-
     solver.solve()
     solver.write_output(args.output)
 

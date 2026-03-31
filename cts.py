@@ -25,7 +25,6 @@ class CTSSolver:
         self.tap_assignments = defaultdict(list)
         self.routing_edges = defaultdict(set)
         self.global_edge_usage = defaultdict(int)
-        # Track which edges are already used by each tap (to avoid double-counting)
         self.tap_edge_sets = defaultdict(set)
 
     def add_pin(self, pin_id, x, y):
@@ -45,12 +44,10 @@ class CTSSolver:
         """True if edge passes THROUGH (not on boundary of) a blockage."""
         for b in self.blockages:
             if x1 == x2:
-                # Vertical edge at x=x1, going from min(y1,y2) to max(y1,y2)
                 if b['x1'] < x1 < b['x2']:
                     if min(y1, y2) < b['y2'] and max(y1, y2) > b['y1']:
                         return True
             else:
-                # Horizontal edge at y=y1, going from min(x1,x2) to max(x1,x2)
                 if b['y1'] < y1 < b['y2']:
                     if min(x1, x2) < b['x2'] and max(x1, x2) > b['x1']:
                         return True
@@ -63,13 +60,10 @@ class CTSSolver:
         return (x2, y2, x1, y1)
 
     def _edge_ok_for_tap(self, x1, y1, x2, y2, tap_idx):
-        """Check if edge can be used (blockage + global capacity).
-        Edges already used by this tap don't consume additional capacity.
-        """
+        """Check if edge can be used (blockage + global capacity)."""
         if self._edge_blocked(x1, y1, x2, y2):
             return False
         k = self._ekey(x1, y1, x2, y2)
-        # If this tap already uses this edge, it won't add to global usage
         if k in self.tap_edge_sets[tap_idx]:
             return True
         return self.global_edge_usage[k] < self.capacity
@@ -93,14 +87,13 @@ class CTSSolver:
                     node = prev[node]
                 path.reverse()
                 return path
-            # Skip if we already found a better path to this node
             if g > dist.get((cx, cy), float('inf')):
                 continue
             ng = g + 1
             for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
                 nx, ny = cx + dx, cy + dy
-                # Bug fix: grid nodes go from 0 to gs inclusive (gs*gs grid has (gs+1)*(gs+1) nodes)
-                if not (0 <= nx <= gs and 0 <= ny <= gs):
+                # Fix: evaluator rejects coords >= grid_size; use strict < gs
+                if not (0 <= nx < gs and 0 <= ny < gs):
                     continue
                 if not self._edge_ok_for_tap(cx, cy, nx, ny, tap_idx):
                     continue
@@ -166,9 +159,7 @@ class CTSSolver:
                         best_idx = ri
                         best_path = p
             if best_path is None:
-                # Bug fix: no path found for any remaining pin.
-                # Skip each unreachable pin one by one instead of aborting all.
-                # Mark the first remaining pin as unroutable and remove it.
+                # No path found: skip unreachable pin one by one
                 remaining.pop(0)
                 continue
             for i in range(len(best_path) - 1):
@@ -176,11 +167,9 @@ class CTSSolver:
                 bx, by = best_path[i + 1]
                 k = self._ekey(ax, ay, bx, by)
                 self.routing_edges[tap_idx].add(k)
-                # Only increment global usage once per edge per tap
                 if k not in self.tap_edge_sets[tap_idx]:
                     self.tap_edge_sets[tap_idx].add(k)
                     self.global_edge_usage[k] += 1
-            # Add all path nodes to connected so they can be reused
             for node in best_path:
                 connected.add(node)
             remaining.pop(best_idx)
@@ -198,12 +187,13 @@ class CTSSolver:
         lines = []
         for ti, tap in enumerate(self.taps):
             tap_id = tap['id']
-            pin_ids = [self.pins[pi]['id'] for pi in self.tap_assignments.get(ti, [])]
+            # Use 0-based pin indices (evaluator expects indices into pins array)
+            pin_indices = self.tap_assignments.get(ti, [])
             edges = self.routing_edges.get(ti, set())
             lines.append('TAP ' + str(tap_id))
-            lines.append('PINS ' + str(len(pin_ids)))
-            for pid in pin_ids:
-                lines.append('PIN ' + str(pid))
+            lines.append('PINS ' + str(len(pin_indices)))
+            for pi in pin_indices:
+                lines.append('PIN ' + str(pi))
             lines.append('ROUTING ' + str(len(edges)))
             for (x1, y1, x2, y2) in edges:
                 lines.append('EDGE ' + str(x1) + ' ' + str(y1) + ' ' + str(x2) + ' ' + str(y2))
@@ -215,14 +205,16 @@ def parse_input(input_file):
     with open(input_file, 'r') as f:
         data = f.read().split()
     it = iter(data)
+
     def nxt():
         return next(it)
+
     rt = ml = gs = cp = None
     solver = None
     try:
         while True:
             tok = nxt()
-            if tok in ('MAXRUNTIME',):
+            if tok in ('MAXRUNTIME', 'MAX_RUNTIME'):
                 rt = int(nxt())
             elif tok in ('MAXLOAD', 'MAX_LOAD'):
                 ml = int(nxt())

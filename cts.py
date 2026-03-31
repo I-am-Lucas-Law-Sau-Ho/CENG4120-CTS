@@ -138,15 +138,11 @@ class CTSSolver:
         tx, ty = t['x'], t['y']
         connected = {(tx, ty)}
         remaining = list(range(len(pis)))
-        # Track indices of pins that could not be routed
-        failed_attempts = set()
         while remaining:
             if time.time() > deadline:
                 break
             best_path, best_idx, best_len = None, None, float('inf')
             for ri, pi_idx in enumerate(remaining):
-                if ri in failed_attempts:
-                    continue
                 pin = self.pins[pis[pi_idx]]
                 dx, dy = pin['x'], pin['y']
                 cands = sorted(connected, key=lambda p: abs(p[0] - dx) + abs(p[1] - dy))
@@ -157,7 +153,7 @@ class CTSSolver:
                         best_idx = ri
                         best_path = p
             if best_path is None:
-                # No path found for any remaining (routable) pin: stop
+                # No routable path found for any remaining pin: stop
                 break
             # Add best path edges to routing
             for i in range(len(best_path) - 1):
@@ -171,8 +167,6 @@ class CTSSolver:
             for node in best_path:
                 connected.add(node)
             remaining.pop(best_idx)
-            # Reset failed_attempts since new nodes may open up paths
-            failed_attempts = set()
 
     def solve(self):
         t0 = time.time()
@@ -203,6 +197,7 @@ class CTSSolver:
 
 
 def parse_input(input_file):
+    """Parse input file line by line to correctly handle structured sections."""
     with open(input_file, 'r') as f:
         lines = f.readlines()
 
@@ -233,7 +228,7 @@ def parse_input(input_file):
                 for _ in range(n):
                     row = lines[i].strip().split()
                     i += 1
-                    # row[0] = 'PIN', row[1] = pin_id, row[2] = x, row[3] = y
+                    # Format: PIN <pin_id> <x> <y>
                     pid, px, py = int(row[1]), int(row[2]), int(row[3])
                     solver.add_pin(pid, px, py)
             elif tok == 'TAPS':
@@ -244,7 +239,7 @@ def parse_input(input_file):
                 for _ in range(n):
                     row = lines[i].strip().split()
                     i += 1
-                    # row[0] = 'TAP', row[1] = tap_id, row[2] = x, row[3] = y
+                    # Format: TAP <tap_id> <x> <y>
                     tid, tx, ty = int(row[1]), int(row[2]), int(row[3])
                     solver.add_tap(tid, tx, ty)
             elif tok == 'BLKS':
@@ -255,7 +250,7 @@ def parse_input(input_file):
                 for _ in range(n):
                     row = lines[i].strip().split()
                     i += 1
-                    # row[0] = 'BLK', row[1] = blk_id, row[2..5] = x1 y1 x2 y2
+                    # Format: BLK <blk_id> <x1> <y1> <x2> <y2>
                     bid = int(row[1])
                     x1, y1 = int(row[2]), int(row[3])
                     x2, y2 = int(row[4]), int(row[5])

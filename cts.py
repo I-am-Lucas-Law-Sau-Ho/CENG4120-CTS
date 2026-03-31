@@ -92,7 +92,7 @@ class CTSSolver:
             ng = g + 1
             for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
                 nx, ny = cx + dx, cy + dy
-                # Fix: evaluator rejects coords >= grid_size; use strict < gs
+                # Grid boundary: coords must be in [0, grid_size-1]
                 if not (0 <= nx < gs and 0 <= ny < gs):
                     continue
                 if not self._edge_ok_for_tap(cx, cy, nx, ny, tap_idx):
@@ -159,7 +159,7 @@ class CTSSolver:
                         best_idx = ri
                         best_path = p
             if best_path is None:
-                # No path found: skip unreachable pin one by one
+                # No path found for any remaining pin: remove first unreachable and try others
                 remaining.pop(0)
                 continue
             for i in range(len(best_path) - 1):
@@ -186,11 +186,12 @@ class CTSSolver:
     def write_output(self, output_file):
         lines = []
         for ti, tap in enumerate(self.taps):
-            tap_id = tap['id']
-            # Use 0-based pin indices (evaluator expects indices into pins array)
+            # Output tap index (0-based), not the original tap ID,
+            # because the evaluator uses the output number as a direct
+            # array index into tap_pins[] and tap_edges[].
             pin_indices = self.tap_assignments.get(ti, [])
             edges = self.routing_edges.get(ti, set())
-            lines.append('TAP ' + str(tap_id))
+            lines.append('TAP ' + str(ti))
             lines.append('PINS ' + str(len(pin_indices)))
             for pi in pin_indices:
                 lines.append('PIN ' + str(pi))

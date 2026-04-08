@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""
-CENG4120 Clock Tree Synthesis (CTS) Project
-Author: Law Sau Ho
-Description: Assigns pins to taps and routes them with blockage avoidance.
-"""
+
 import argparse
 import sys
 from collections import defaultdict

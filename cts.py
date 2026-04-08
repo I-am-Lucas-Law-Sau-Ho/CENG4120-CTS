@@ -5,8 +5,8 @@ import time
 from collections import defaultdict
 from heapq import heappush, heappop
 
-NL = "\n"
-
+NL = "
+"
 
 class CTSSolver:
     def __init__(self, max_runtime, max_load, grid_size, capacity):
@@ -14,20 +14,16 @@ class CTSSolver:
         self.max_load = max_load
         self.grid_size = grid_size
         self.capacity = capacity
-
         self.pins = []
         self.taps = []
         self.blockages = []
-
         self.tap_assignments = defaultdict(list)
         self.routing_edges = defaultdict(set)
         self.tap_edge_sets = defaultdict(set)
         self.global_edge_usage = defaultdict(int)
-
         self.blocked_edges = set()
         self.pin_tap_dist = []
         self.history_cost = defaultdict(float)
-
         self.best_snapshot = None
 
     def add_pin(self, pin_id, x, y):
@@ -51,18 +47,18 @@ class CTSSolver:
 
     def _precompute_blocked_edges(self):
         self.blocked_edges.clear()
-        gs = self.grid_size
-
         for b in self.blockages:
             x1, y1, x2, y2 = b["x1"], b["y1"], b["x2"], b["y2"]
-
-            for x in range(max(0, x1 + 1), min(gs, x2)):
-                for y in range(max(0, y1), min(gs - 1, y2)):
-                    self.blocked_edges.add(self._ekey(x, y, x, y + 1))
-
-            for y in range(max(0, y1 + 1), min(gs, y2)):
-                for x in range(max(0, x1), min(gs - 1, x2)):
+            # A blockage covering (x1, y1) to (x2, y2) blocks any edge crossing its boundaries
+            # or lying within it.
+            # Horizontal edges (x, y) to (x+1, y)
+            for x in range(x1, x2):
+                for y in range(y1, y2 + 1):
                     self.blocked_edges.add(self._ekey(x, y, x + 1, y))
+            # Vertical edges (x, y) to (x, y+1)
+            for x in range(x1, x2 + 1):
+                for y in range(y1, y2):
+                    self.blocked_edges.add(self._ekey(x, y, x, y + 1))
 
     def _edge_ok_for_tap(self, x1, y1, x2, y2, tap_idx):
         k = self._ekey(x1, y1, x2, y2)
@@ -74,31 +70,24 @@ class CTSSolver:
 
     def _edge_step_cost(self, x1, y1, x2, y2, tap_idx):
         k = self._ekey(x1, y1, x2, y2)
-
         if k in self.tap_edge_sets[tap_idx]:
-            return 0.15
-
+            return 0.1
         usage = self.global_edge_usage[k]
         cong = usage / max(1, self.capacity)
         hist = self.history_cost[k]
-
-        return 1.0 + 2.5 * cong + hist
+        return 1.0 + 5.0 * cong + hist
 
     def _find_path(self, sx, sy, ex, ey, tap_idx):
         if sx == ex and sy == ey:
             return [(sx, sy)]
-
         gs = self.grid_size
         heap = []
         start_h = abs(ex - sx) + abs(ey - sy)
         heappush(heap, (start_h, 0.0, sx, sy))
-
         dist = {(sx, sy): 0.0}
         prev = {(sx, sy): None}
-
         while heap:
             f, g, cx, cy = heappop(heap)
-
             if (cx, cy) == (ex, ey):
                 path = []
                 cur = (cx, cy)
@@ -107,26 +96,21 @@ class CTSSolver:
                     cur = prev[cur]
                 path.reverse()
                 return path
-
             if g > dist.get((cx, cy), float("inf")):
                 continue
-
             for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
                 nx, ny = cx + dx, cy + dy
                 if not (0 <= nx < gs and 0 <= ny < gs):
                     continue
                 if not self._edge_ok_for_tap(cx, cy, nx, ny, tap_idx):
                     continue
-
                 step = self._edge_step_cost(cx, cy, nx, ny, tap_idx)
                 ng = g + step
-
                 if ng < dist.get((nx, ny), float("inf")):
                     dist[(nx, ny)] = ng
                     prev[(nx, ny)] = (cx, cy)
                     h = abs(ex - nx) + abs(ey - ny)
                     heappush(heap, (ng + h, ng, nx, ny))
-
         return None
 
     def _precompute_pin_tap_distances(self):
@@ -141,43 +125,36 @@ class CTSSolver:
         self.tap_assignments = defaultdict(list)
         if not self.taps:
             return
-
         tap_loads = [0] * len(self.taps)
         pin_order = []
-
         for pi in range(len(self.pins)):
             ds = sorted((self.pin_tap_dist[pi][ti], ti) for ti in range(len(self.taps)))
             best = ds[0][0]
             second = ds[1][0] if len(ds) > 1 else ds[0][0]
             regret = second - best
             pin_order.append((-regret, best, pi, ds))
-
         pin_order.sort()
-
         for _, _, pi, ds in pin_order:
             chosen = None
             best_score = float("inf")
-
             for d, ti in ds:
-                overload_penalty = 1000000 if tap_loads[ti] >= self.max_load else 0
-                balance_penalty = 0.75 * tap_loads[ti]
+                overload_penalty = 1e9 if tap_loads[ti] >= self.max_load else 0
+                balance_penalty = 0.5 * tap_loads[ti]
                 score = d + balance_penalty + overload_penalty
                 if score < best_score:
                     best_score = score
                     chosen = ti
-
             self.tap_assignments[chosen].append(pi)
             tap_loads[chosen] += 1
-
         self._improve_assignments(tap_loads)
 
     def _assignment_cost(self, pi, ti, tap_loads):
         d = self.pin_tap_dist[pi][ti]
         overload = max(0, tap_loads[ti] - self.max_load)
-        return d + 1.2 * tap_loads[ti] + 10000 * overload
+        return d + 1.0 * tap_loads[ti] + 1e7 * overload
 
     def _improve_assignments(self, tap_loads):
-        for _ in range(2):
+        for _ in range(5):
             moved = False
             for ti in range(len(self.taps)):
                 cur_list = list(self.tap_assignments[ti])
@@ -185,7 +162,6 @@ class CTSSolver:
                     old_cost = self._assignment_cost(pi, ti, tap_loads)
                     best_ti = ti
                     best_gain = 0.0
-
                     for tj in range(len(self.taps)):
                         if tj == ti:
                             continue
@@ -195,11 +171,9 @@ class CTSSolver:
                         gain = old_cost - new_cost
                         tap_loads[ti] += 1
                         tap_loads[tj] -= 1
-
-                        if gain > best_gain and tap_loads[tj] < self.max_load + 1:
+                        if gain > best_gain:
                             best_gain = gain
                             best_ti = tj
-
                     if best_ti != ti:
                         self.tap_assignments[ti].remove(pi)
                         self.tap_assignments[best_ti].append(pi)
@@ -231,54 +205,44 @@ class CTSSolver:
         pis = self.tap_assignments.get(tap_idx, [])
         if not pis:
             return True
-
         t = self.taps[tap_idx]
         tx, ty = t["x"], t["y"]
         connected = {(tx, ty)}
         remaining = set(pis)
-
         while remaining and time.time() < deadline:
             best_pin = None
             best_path = None
             best_score = float("inf")
-
+            # Order remaining pins by distance to the already connected set (Steiner-like)
             ordered_pins = sorted(
                 remaining,
-                key=lambda pi: min(abs(self.pins[pi]["x"] - cx) + abs(self.pins[pi]["y"] - cy) for cx, cy in connected),
-                reverse=True
+                key=lambda pi: min(abs(self.pins[pi]["x"] - cx) + abs(self.pins[pi]["y"] - cy) for cx, cy in connected)
             )
-
-            for pi in ordered_pins[: min(10, len(ordered_pins))]:
+            for pi in ordered_pins[:5]:
                 px, py = self.pins[pi]["x"], self.pins[pi]["y"]
                 cand_sources = sorted(
                     connected,
                     key=lambda p: abs(p[0] - px) + abs(p[1] - py)
-                )[:12]
-
+                )[:10]
                 for sx, sy in cand_sources:
                     path = self._find_path(sx, sy, px, py, tap_idx)
                     if path is None:
                         continue
-
                     cost = 0.0
                     for i in range(len(path) - 1):
                         ax, ay = path[i]
                         bx, by = path[i + 1]
                         cost += self._edge_step_cost(ax, ay, bx, by, tap_idx)
-
                     if cost < best_score:
                         best_score = cost
                         best_pin = pi
                         best_path = path
-
             if best_path is None:
                 return False
-
             self._add_path(tap_idx, best_path)
             for node in best_path:
                 connected.add(node)
             remaining.remove(best_pin)
-
         return len(remaining) == 0
 
     def _count_violations(self):
@@ -286,39 +250,25 @@ class CTSSolver:
         for _, usage in self.global_edge_usage.items():
             if usage > self.capacity:
                 over_capacity += usage - self.capacity
-
         load_viol = 0
         for ti in range(len(self.taps)):
             load_viol += max(0, len(self.tap_assignments.get(ti, [])) - self.max_load)
-
         unrouted = 0
         for ti in range(len(self.taps)):
-            assigned = len(self.tap_assignments.get(ti, []))
-            if assigned == 0:
-                continue
-            if len(self.routing_edges.get(ti, set())) == 0:
-                unrouted += assigned
-
+            assigned = self.tap_assignments.get(ti, [])
+            if not assigned: continue
+            if not self.routing_edges.get(ti):
+                unrouted += len(assigned)
         return over_capacity, load_viol, unrouted
 
     def _total_wirelength(self):
         return sum(len(edges) for edges in self.routing_edges.values())
 
     def _snapshot(self):
-        snap_assign = defaultdict(list)
-        snap_route = defaultdict(set)
-        snap_tap_edges = defaultdict(set)
-        snap_usage = defaultdict(int)
-
-        for k, v in self.tap_assignments.items():
-            snap_assign[k] = list(v)
-        for k, v in self.routing_edges.items():
-            snap_route[k] = set(v)
-        for k, v in self.tap_edge_sets.items():
-            snap_tap_edges[k] = set(v)
-        for k, v in self.global_edge_usage.items():
-            snap_usage[k] = v
-
+        snap_assign = {k: list(v) for k, v in self.tap_assignments.items()}
+        snap_route = {k: set(v) for k, v in self.routing_edges.items()}
+        snap_tap_edges = {k: set(v) for k, v in self.tap_edge_sets.items()}
+        snap_usage = dict(self.global_edge_usage)
         self.best_snapshot = (snap_assign, snap_route, snap_tap_edges, snap_usage)
 
     def _restore_snapshot(self):
@@ -328,7 +278,7 @@ class CTSSolver:
         self.tap_assignments = defaultdict(list, {k: list(v) for k, v in a.items()})
         self.routing_edges = defaultdict(set, {k: set(v) for k, v in r.items()})
         self.tap_edge_sets = defaultdict(set, {k: set(v) for k, v in te.items()})
-        self.global_edge_usage = defaultdict(int, {k: v for k, v in gu.items()})
+        self.global_edge_usage = defaultdict(int, gu)
 
     def _score_tuple(self):
         over_capacity, load_viol, unrouted = self._count_violations()
@@ -337,59 +287,45 @@ class CTSSolver:
 
     def solve(self):
         t0 = time.time()
-        deadline = t0 + self.max_runtime - 0.5
-
+        deadline = t0 + self.max_runtime - 1.0
         self._precompute_blocked_edges()
         self._precompute_pin_tap_distances()
         self._assign_pins()
-
-        tap_order = sorted(
-            range(len(self.taps)),
-            key=lambda ti: len(self.tap_assignments.get(ti, [])),
-            reverse=True
-        )
-
+        
+        tap_order = sorted(range(len(self.taps)), key=lambda ti: len(self.tap_assignments.get(ti, [])), reverse=True)
         for ti in tap_order:
-            if time.time() > deadline:
-                break
+            if time.time() > deadline: break
             self._route_tap(ti, deadline)
-
+        
         self._snapshot()
         best_score = self._score_tuple()
-
+        
         rounds = 0
-        while time.time() < deadline and rounds < 4:
+        while time.time() < deadline and rounds < 10:
             rounds += 1
-
-            current_scores = []
-            for ti in range(len(self.taps)):
-                current_scores.append((len(self.routing_edges.get(ti, set())), ti))
-            current_scores.sort()
-
-            reroute_list = [ti for _, ti in current_scores[: max(1, len(current_scores) // 3)]]
-
-            for ti in reroute_list:
-                self._ripup_tap(ti)
-
-            congested_edges = [k for k, v in self.global_edge_usage.items() if v >= self.capacity]
+            congested_edges = [k for k, v in self.global_edge_usage.items() if v > self.capacity]
+            if not congested_edges and best_score[0] == 0 and best_score[1] == 0 and best_score[2] == 0:
+                break
             for k in congested_edges:
-                self.history_cost[k] += 0.35
-
-            for ti in reroute_list:
-                if time.time() > deadline:
-                    break
+                self.history_cost[k] += 1.0
+            
+            # Reroute a portion of taps
+            reroute_list = sorted(range(len(self.taps)), key=lambda ti: sum(self.global_edge_usage[k] for k in self.tap_edge_sets[ti]), reverse=True)
+            for ti in reroute_list[:max(1, len(self.taps)//4)]:
+                if time.time() > deadline: break
+                self._ripup_tap(ti)
                 self._route_tap(ti, deadline)
-
+            
             cur_score = self._score_tuple()
             if cur_score < best_score:
                 best_score = cur_score
                 self._snapshot()
-
-        self._restore_snapshot()
+            else:
+                self._restore_snapshot()
 
     def write_output(self, output_file):
         lines = []
-        for ti, tap in enumerate(self.taps):
+        for ti in range(len(self.taps)):
             pin_indices = self.tap_assignments.get(ti, [])
             edges = self.routing_edges.get(ti, set())
             lines.append(f"TAP {ti}")
@@ -399,94 +335,61 @@ class CTSSolver:
             lines.append(f"ROUTING {len(edges)}")
             for (x1, y1, x2, y2) in edges:
                 lines.append(f"EDGE {x1} {y1} {x2} {y2}")
-
         with open(output_file, "w") as f:
             f.write(NL.join(lines) + NL)
 
-
 def parse_input(input_file):
-    with open(input_file, "r") as f:
-        lines = f.readlines()
-
+    try:
+        with open(input_file, "r") as f:
+            lines = f.readlines()
+    except Exception:
+        return None
+    
     rt = ml = gs = cp = None
     solver = None
-
-    try:
-        i = 0
-        while i < len(lines):
-            data = lines[i].strip().split()
+    i = 0
+    while i < len(lines):
+        line = lines[i].strip()
+        if not line:
             i += 1
-            if not data:
-                continue
-
-            tok = data[0]
-
-            if tok in ("MAXRUNTIME", "MAX_RUNTIME"):
-                rt = int(data[1])
-            elif tok in ("MAXLOAD", "MAX_LOAD"):
-                ml = int(data[1])
-            elif tok in ("GRIDSIZE", "GRID_SIZE"):
-                gs = int(data[1])
-            elif tok == "CAPACITY":
-                cp = int(data[1])
-
-            elif tok == "PINS":
-                if ml is None or gs is None or cp is None:
-                    print("ERROR: PINS encountered before required parameters.", file=sys.stderr)
-                    return None
-                solver = CTSSolver(rt, ml, gs, cp)
-                n = int(data[1])
-                for _ in range(n):
-                    row = lines[i].strip().split()
-                    i += 1
-                    pid, px, py = int(row[1]), int(row[2]), int(row[3])
-                    solver.add_pin(pid, px, py)
-
-            elif tok == "TAPS":
-                if solver is None:
-                    print("ERROR: TAPS encountered before PINS.", file=sys.stderr)
-                    return None
-                n = int(data[1])
-                for _ in range(n):
-                    row = lines[i].strip().split()
-                    i += 1
-                    tid, tx, ty = int(row[1]), int(row[2]), int(row[3])
-                    solver.add_tap(tid, tx, ty)
-
-            elif tok == "BLKS":
-                if solver is None:
-                    print("ERROR: BLKS encountered before PINS.", file=sys.stderr)
-                    return None
-                n = int(data[1])
-                for _ in range(n):
-                    row = lines[i].strip().split()
-                    i += 1
-                    bid = int(row[1])
-                    x1, y1 = int(row[2]), int(row[3])
-                    x2, y2 = int(row[4]), int(row[5])
-                    solver.add_blockage(bid, x1, y1, x2, y2)
-
-    except (ValueError, AttributeError, IndexError) as e:
-        print(f"ERROR: Parse error: {e}", file=sys.stderr)
-        return None
-
+            continue
+        data = line.split()
+        tok = data[0]
+        if tok == "MAX_RUNTIME": rt = int(data[1])
+        elif tok == "MAX_LOAD": ml = int(data[1])
+        elif tok == "GRID_SIZE": gs = int(data[1])
+        elif tok == "CAPACITY": cp = int(data[1])
+        elif tok == "PINS":
+            num = int(data[1])
+            if solver is None: solver = CTSSolver(rt, ml, gs, cp)
+            for _ in range(num):
+                i += 1
+                row = lines[i].strip().split()
+                solver.add_pin(int(row[1]), int(row[2]), int(row[3]))
+        elif tok == "TAPS":
+            num = int(data[1])
+            for _ in range(num):
+                i += 1
+                row = lines[i].strip().split()
+                solver.add_tap(int(row[1]), int(row[2]), int(row[3]))
+        elif tok == "BLKS":
+            num = int(data[1])
+            for _ in range(num):
+                i += 1
+                row = lines[i].strip().split()
+                solver.add_blockage(int(row[1]), int(row[2]), int(row[3]), int(row[4]), int(row[5]))
+        i += 1
     return solver
 
-
 def main():
-    parser = argparse.ArgumentParser(description="CENG4120 CTS Solver")
+    parser = argparse.ArgumentParser()
     parser.add_argument("--input", required=True)
     parser.add_argument("--output", required=True)
     args = parser.parse_args()
-
     solver = parse_input(args.input)
-    if solver is None:
-        print("ERROR: Failed to parse input.", file=sys.stderr)
-        sys.exit(1)
-
-    solver.solve()
-    solver.write_output(args.output)
-
+    if solver:
+        solver.solve()
+        solver.write_output(args.output)
 
 if __name__ == "__main__":
     main()

@@ -1,170 +1,121 @@
-# CENG4120 Clock Tree Synthesis (CTS)
+# CENG4120-CTS
 
-## Project Overview
-This project implements a Clock Tree Synthesis (CTS) solver for the CENG4120 course at CUHK. The program assigns clock pins to clock taps and routes them while minimizing delay skew and total wire length.
+Python implementation for the CENG4120 Clock Tree Synthesis (CTS) project.
 
-## Author
-Law Sau Ho (Lucas)
-CUHK Computer Engineering
-March 2026
+## Overview
+
+This solver builds routing trees from taps to pins on a 2D grid with:
+- edge capacity constraints,
+- rectangular blockages,
+- tap load limits,
+- and a runtime budget.
+
+The implementation is designed to improve legality and overall evaluator score by combining:
+- capacity-aware pin assignment,
+- congestion-aware A* routing,
+- Steiner-like incremental tree construction,
+- and limited rip-up / reroute refinement.
 
 ## Features
-- **Pin Assignment**: Optimal assignment of pins to taps based on Manhattan distance
-- **A* Pathfinding**: Intelligent routing that avoids blockages and respects capacity constraints
-- **Steiner Tree Construction**: Efficient tree construction using Prim's algorithm variant
-- **Constraint Satisfaction**: Respects MAX_LOAD and CAPACITY constraints
-- **Blockage Avoidance**: Routes around rectangular obstacles
-- **Cost Optimization**: Minimizes delay skew and total tree length
 
-## Requirements
-- Python 3.6 or higher
-- No external dependencies (uses only standard library)
+- Fast blocked-edge precomputation.
+- Regret-based pin-to-tap assignment with light balancing.
+- A* routing with congestion and history penalties.
+- Per-tap tree growth using reusable routed edges.
+- Iterative rerouting of weaker trees before timeout.
+- Same input/output format as the course evaluator.
 
-## Installation
-```bash
-git clone https://github.com/I-am-Lucas-Law-Sau-Ho/CENG4120-CTS.git
-cd CENG4120-CTS
-chmod +x cts.py
-```
+## Algorithm
+
+### 1. Input parsing
+The program parses:
+- `MAXRUNTIME` / `MAX_RUNTIME`
+- `MAXLOAD` / `MAX_LOAD`
+- `GRIDSIZE` / `GRID_SIZE`
+- `CAPACITY`
+- `PINS`
+- `TAPS`
+- `BLKS`
+
+### 2. Blocked-edge precomputation
+Instead of checking every blockage during every A* expansion, the solver converts all blocked grid edges into a hash set once at startup. This significantly reduces routing overhead.
+
+### 3. Pin assignment
+Pins are assigned to taps using a regret-based heuristic:
+- compute distances from each pin to all taps,
+- prioritize pins whose second-best tap is much worse than their best tap,
+- include a load-balance penalty to avoid poor clustering.
+
+A small local improvement pass then moves pins between taps when it reduces estimated assignment cost.
+
+### 4. Routing
+For each tap cluster, the solver incrementally builds a routing tree:
+- start from the tap,
+- repeatedly connect one unconnected pin to the existing tree,
+- allow connection to any already-routed tree node.
+
+Routing uses A* with a composite edge cost:
+- base wirelength cost,
+- congestion penalty from current global edge usage,
+- history penalty for edges that repeatedly cause routing difficulty,
+- low reuse cost for edges already used by the same tap tree.
+
+This encourages legal routing and edge sharing inside each clock tree.
+
+### 5. Improvement rounds
+After the initial solution is built, the solver performs a few improvement rounds before timeout:
+- rip up selected weaker trees,
+- increase history cost on problematic congested edges,
+- reroute those trees using the updated penalties,
+- keep the best solution found.
 
 ## Usage
+
 ```bash
-python3 cts.py --input <input_file> --output <output_file>
+python3 cts.py --input test.in --output out.txt
 ```
 
-Or make it executable:
-```bash
-chmod +x cts.py
-./cts.py --input test.in --output test.out
-```
+## Output format
 
-## Input Format
-```
-MAXRUNTIME <time_in_seconds>
-MAXLOAD <max_pins_per_tap>
-GRIDSIZE <grid_dimension>
-CAPACITY <max_wires_per_edge>
-PINS <num_pins>
-PIN <id> <x> <y>
-...
-TAPS <num_taps>
-TAP <id> <x> <y>
-...
-BLKS <num_blockages>
-BLK <id> <x1> <y1> <x2> <y2>
+For each tap, the solver outputs:
+- assigned pins,
+- routed edges for that tap tree.
+
+Example:
+```text
+TAP 0
+PINS 3
+PIN 1
+PIN 4
+PIN 7
+ROUTING 5
+EDGE 1 1 1 2
+EDGE 1 2 2 2
 ...
 ```
 
-## Output Format
-```
-TAP <tap_id>
-PINS <num_pins>
-PIN <pin_id>
-...
-ROUTING <num_edges>
-EDGE <x1> <y1> <x2> <y2>
-...
-```
+## Design goals
 
-## Algorithm Details
+This implementation prioritizes:
+1. legal connectivity,
+2. avoiding capacity violations,
+3. respecting tap load as much as possible,
+4. reducing total routed wirelength,
+5. improving score within limited runtime.
 
-### 1. Pin Assignment
-- Sorts pins by distance to nearest tap
-- Greedily assigns each pin to the closest available tap
-- Respects MAX_LOAD constraint
+## Notes
 
-### 2. Routing
-- Uses A* pathfinding for each connection
-- Heuristic: Manhattan distance to target
-- Avoids blockages and respects capacity constraints
-- Builds Steiner tree using Prim's algorithm variant
+- This is a heuristic solver, not an exact optimizer.
+- Score improvement depends on testcase structure.
+- The algorithm is tuned for better practical evaluator behavior compared with a simple nearest-assignment + single-pass routing baseline.
 
-### 3. Optimization
-The cost function minimizes:
-```
-cost = (max_delay - min_delay) / num_taps + sum(tree_lengths) / num_taps
-```
+## Files
 
-## Example
-Sample input (`test.in`):
-```
-MAXRUNTIME 1
-MAXLOAD 5
-GRIDSIZE 10
-CAPACITY 1
-PINS 8
-PIN 0 0 7
-PIN 1 8 7
-PIN 2 6 9
-PIN 3 1 2
-PIN 4 2 1
-PIN 5 9 0
-PIN 6 1 0
-PIN 7 7 8
-TAPS 2
-TAP 0 4 5
-TAP 1 5 2
-```
+- `cts.py` — main solver
+- `README.md` — project documentation
+- `test.in` / `test0.in` — sample input
+- `eval(1).py` — evaluator helper from project work
 
-Run:
-```bash
-./cts.py --input test.in --output test.out
-```
+## Author
 
-## Project Structure
-```
-CENG4120-CTS/
-├── cts.py          # Main solver implementation
-└── README.md       # This file
-```
-
-## Implementation Notes
-- **Point class**: Represents 2D coordinates with Manhattan distance calculation
-- **Edge class**: Manages routing edges and unit edge decomposition
-- **CTSSolver class**: Main solver with pin assignment and routing logic
-- **Time Management**: Stops routing if approaching MAXRUNTIME limit
-- **Edge Merging**: Overlapping edges are automatically merged in output
-
-## Evaluation Criteria
-According to project specification:
-- **Connectivity Check** (20%): No open or short pins
-- **Capacity Check** (20%): Respect edge capacity constraints
-- **Load Check** (20%): Each tap drives ≤ MAX_LOAD pins
-- **No Open/Short** (30%): All pins properly connected
-- **Ranking Bonus** (10%): Based on cost function performance
-
-## Testing
-To verify your solution:
-1. Create test input files following the format above
-2. Run the solver
-3. Check output for:
-   - All pins assigned
-   - No capacity violations
-   - All pins connected to taps
-   - Valid edge coordinates
-
-## Troubleshooting
-
-### Common Issues
-1. **"No path found"**: Increase grid size or reduce blockages
-2. **Capacity violations**: Increase CAPACITY or reduce pin density
-3. **Load violations**: Add more taps or increase MAXLOAD
-
-### Performance Tips
-- Smaller grid sizes run faster
-- Fewer blockages enable better routing
-- More taps distribute load better
-
-## Academic Integrity
-This project was completed as part of CENG4120 course requirements. The implementation uses standard algorithms (A*, Prim's, greedy assignment) adapted for the CTS problem.
-
-## License
-This project is submitted as coursework for CENG4120 at CUHK.
-
-## Contact
 Law Sau Ho
-Computer Engineering, CUHK
-Email: lucaslawsauho@gmail.com
-
----
-*Last Updated: March 20, 2026*

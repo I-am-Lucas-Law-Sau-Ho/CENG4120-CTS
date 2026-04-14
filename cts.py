@@ -49,13 +49,9 @@ class CTSSolver:
         self.blocked_edges.clear()
         for b in self.blockages:
             x1, y1, x2, y2 = b["x1"], b["y1"], b["x2"], b["y2"]
-            # A blockage covering (x1, y1) to (x2, y2) blocks any edge crossing its boundaries
-            # or lying within it.
-            # Horizontal edges (x, y) to (x+1, y)
             for x in range(x1, x2):
                 for y in range(y1, y2 + 1):
                     self.blocked_edges.add(self._ekey(x, y, x + 1, y))
-            # Vertical edges (x, y) to (x, y+1)
             for x in range(x1, x2 + 1):
                 for y in range(y1, y2):
                     self.blocked_edges.add(self._ekey(x, y, x, y + 1))
@@ -213,7 +209,6 @@ class CTSSolver:
             best_pin = None
             best_path = None
             best_score = float("inf")
-            # Order remaining pins by distance to the already connected set (Steiner-like)
             ordered_pins = sorted(
                 remaining,
                 key=lambda pi: min(abs(self.pins[pi]["x"] - cx) + abs(self.pins[pi]["y"] - cy) for cx, cy in connected)
@@ -309,7 +304,6 @@ class CTSSolver:
             for k in congested_edges:
                 self.history_cost[k] += 1.0
             
-            # Reroute a portion of taps
             reroute_list = sorted(range(len(self.taps)), key=lambda ti: sum(self.global_edge_usage[k] for k in self.tap_edge_sets[ti]), reverse=True)
             for ti in reroute_list[:max(1, len(self.taps)//4)]:
                 if time.time() > deadline: break
@@ -341,44 +335,55 @@ class CTSSolver:
 def parse_input(input_file):
     try:
         with open(input_file, "r") as f:
-            lines = f.readlines()
+            content = f.read().split()
     except Exception:
         return None
     
     rt = ml = gs = cp = None
     solver = None
     i = 0
-    while i < len(lines):
-        line = lines[i].strip()
-        if not line:
-            i += 1
-            continue
-        data = line.split()
-        tok = data[0]
-        if tok == "MAX_RUNTIME": rt = int(data[1])
-        elif tok == "MAX_LOAD": ml = int(data[1])
-        elif tok == "GRID_SIZE": gs = int(data[1])
-        elif tok == "CAPACITY": cp = int(data[1])
+    while i < len(content):
+        tok = content[i]
+        if tok == "MAXRUNTIME":
+            rt = int(content[i+1])
+            i += 2
+        elif tok == "MAXLOAD":
+            ml = int(content[i+1])
+            i += 2
+        elif tok == "GRIDSIZE":
+            gs = int(content[i+1])
+            i += 2
+        elif tok == "CAPACITY":
+            cp = int(content[i+1])
+            i += 2
         elif tok == "PINS":
-            num = int(data[1])
-            if solver is None: solver = CTSSolver(rt, ml, gs, cp)
+            num = int(content[i+1])
+            i += 2
+            if solver is None:
+                solver = CTSSolver(rt, ml, gs, cp)
             for _ in range(num):
-                i += 1
-                row = lines[i].strip().split()
-                solver.add_pin(int(row[1]), int(row[2]), int(row[3]))
+                # Expecting: PIN <id> <x> <y>
+                if content[i] == "PIN":
+                    solver.add_pin(int(content[i+1]), int(content[i+2]), int(content[i+3]))
+                    i += 4
         elif tok == "TAPS":
-            num = int(data[1])
+            num = int(content[i+1])
+            i += 2
             for _ in range(num):
-                i += 1
-                row = lines[i].strip().split()
-                solver.add_tap(int(row[1]), int(row[2]), int(row[3]))
+                # Expecting: TAP <id> <x> <y>
+                if content[i] == "TAP":
+                    solver.add_tap(int(content[i+1]), int(content[i+2]), int(content[i+3]))
+                    i += 4
         elif tok == "BLKS":
-            num = int(data[1])
+            num = int(content[i+1])
+            i += 2
             for _ in range(num):
-                i += 1
-                row = lines[i].strip().split()
-                solver.add_blockage(int(row[1]), int(row[2]), int(row[3]), int(row[4]), int(row[5]))
-        i += 1
+                # Expecting: BLK <id> <x1> <y1> <x2> <y2>
+                if content[i] == "BLK":
+                    solver.add_blockage(int(content[i+1]), int(content[i+2]), int(content[i+3]), int(content[i+4]), int(content[i+5]))
+                    i += 6
+        else:
+            i += 1
     return solver
 
 def main():

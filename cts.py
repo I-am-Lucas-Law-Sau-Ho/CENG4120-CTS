@@ -290,7 +290,8 @@ class CTSSolver:
         if self.grid_size is None or self.capacity is None or self.max_load is None:
             return
         t0 = time.time()
-        deadline = t0 + self.max_runtime - 1.0
+        # Use almost the full runtime budget, while keeping a small safety margin so we never exceed MAXRUNTIME.
+        deadline = t0 + max(0.1, self.max_runtime - 0.1)
         self._precompute_blocked_edges()
         self._precompute_pin_tap_distances()
         self._assign_pins()

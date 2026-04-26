@@ -1,6 +1,6 @@
 # CENG4120-CTS
 
-Python implementation for the CENG4120 Clock Tree Synthesis (CTS) project.
+Python implementation for the CENG4120 Clock Tree Synthesis (CTS) project.Update README.md with Team 7 details and results
 
 ## Overview
 
